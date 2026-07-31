@@ -189,7 +189,19 @@ export async function handoffTask(taskId: string, input: HandoffTaskInput) {
     const handoff = await db.transaction(async (tx) => {
       // Capture the context snapshot inside the same transaction so it
       // reflects a single, consistent moment in time.
-      const [task] = await tx.select().from(tasksTable).where(eq(tasksTable.id, taskId));
+      //
+      // FOR UPDATE is load-bearing here. A plain SELECT takes no row lock
+      // under READ COMMITTED, so two concurrent handoffs from the same owner
+      // could both read themselves as the current owner, both pass the checks
+      // below, and both commit — recording two transfers to two different
+      // recipients for a single change of ownership. Locking the row
+      // serialises them: the second transaction blocks here, then re-reads and
+      // finds ownership already cleared.
+      const [task] = await tx
+        .select()
+        .from(tasksTable)
+        .where(eq(tasksTable.id, taskId))
+        .for("update");
       if (!task) {
         throw new Error(`Task ${taskId} not found`);
       }
@@ -259,10 +271,21 @@ export async function handoffTask(taskId: string, input: HandoffTaskInput) {
         })
         .returning();
 
-      await tx
+      // Atomic conditional release, mirroring the conditional claim in
+      // acceptTask: the UPDATE itself re-asserts ownership rather than
+      // trusting the earlier read. The row lock above already guarantees
+      // exclusivity, so this should never fail — asserting the affected row
+      // count keeps that guarantee explicit instead of leaving it implicit in
+      // the isolation level.
+      const released = await tx
         .update(tasksTable)
         .set({ status: "transitioned", currentOwnerActorId: null })
-        .where(eq(tasksTable.id, taskId));
+        .where(and(eq(tasksTable.id, taskId), eq(tasksTable.currentOwnerActorId, fromActorId)))
+        .returning({ id: tasksTable.id });
+
+      if (released.length !== 1) {
+        throw new Error(`Task ${taskId} ownership changed during handoff; handoff rejected`);
+      }
 
       return row;
     });
@@ -272,9 +295,11 @@ export async function handoffTask(taskId: string, input: HandoffTaskInput) {
     const message = err instanceof Error ? err.message : "Failed to capture context snapshot";
     const status = message.startsWith(`Task ${taskId} not found`)
       ? 404
-      : message.includes("cannot hand it off") || message.includes("handoff rejected")
-        ? 403
-        : 400;
+      : message.includes("ownership changed during handoff")
+        ? 409
+        : message.includes("cannot hand it off") || message.includes("handoff rejected")
+          ? 403
+          : 400;
     return fail(status, message);
   }
 }
