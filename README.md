@@ -85,9 +85,26 @@ Connect a real MCP client (e.g. Claude Code):
 claude mcp add --transport http opp http://localhost:5000/mcp --header "Authorization: Bearer <your-token>"
 ```
 
+## Running the tests
+
+The suite covers the protocol's concurrency guarantees, so it needs a real
+PostgreSQL instance — it exercises genuinely simultaneous transactions and
+cannot run against an in-process or single-connection substitute.
+
+```bash
+pnpm --filter @workspace/api-server run test
+```
+
+Tests connect to `postgresql://opp:opptest@127.0.0.1:55432/opp_test` by
+default. Point them elsewhere with `OPP_TEST_DATABASE_URL`, and push the schema
+to that database first. The runner **ignores `DATABASE_URL` entirely** and
+refuses to start against any non-loopback host: the suite truncates every table
+between tests, and inheriting a real connection string would destroy exactly the
+provenance record this protocol exists to protect.
+
 ## Status
 
-This is an early, personally-tested project, not a polished product. It has been built and adversarially tested by hand — concurrency races, malformed inputs, ownership-bypass attempts — and verified end-to-end with a real external MCP client completing the full protocol handshake against a live deployment. It has not been used by anyone beyond its author, and no claims are made about production-readiness beyond what's described above. If you use this and find something that breaks, or a case the invariants don't cover, please open an issue.
+This is an early, personally-tested project, not a polished product. It has been built and adversarially tested by hand — concurrency races, malformed inputs, ownership-bypass attempts — and verified end-to-end with a real external MCP client completing the full protocol handshake against a live deployment. The ownership and provenance guarantees that hand-testing covered are now pinned by an automated suite that runs the races concurrently against a real database. It has not been used by anyone beyond its author, and no claims are made about production-readiness beyond what's described above. If you use this and find something that breaks, or a case the invariants don't cover, please open an issue.
 
 ## License
 
