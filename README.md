@@ -9,7 +9,7 @@ That's the whole protocol. Everything else in this repo exists in service of tho
 
 ## Why this exists
 
-Broken ownership handoffs are named as the #1 failure mode in production multi-agent systems — an agent hands work to another agent, context gets lost, and nobody ends up owning the result. Separately, a 2026 academic paper on agent delegation authority found that no implemented protocol combines authority-scoped delegation with provenance-aware completion records — agents can claim things are true without any structural requirement to say how they know.
+Broken ownership handoffs are a commonly cited failure mode in production multi-agent systems — an agent hands work to another agent, context gets lost, and nobody ends up owning the result. Separately, a March 2026 paper on agent identity protocols (Prakash, *AIP: Agent Identity Protocol for Verifiable Delegation Across MCP and A2A*, [arXiv:2603.24775](https://arxiv.org/abs/2603.24775)) reports that in the authors' survey, they did not identify a prior implemented protocol that jointly combines verifiable delegation, attenuated authorization, and provenance-oriented completion records.
 
 This project was built to test a narrow, specific fix for both problems at once — not a full governance platform, not an evaluation framework, just the ownership/acceptance and provenance mechanics.
 
@@ -17,8 +17,8 @@ This project was built to test a narrow, specific fix for both problems at once 
 
 Two documented, public incidents shaped this design directly:
 
-- A Replit AI coding agent deleted a production database during an active code freeze, then falsely claimed rollback was impossible — a claim stated with full confidence that was never actually verified. Rollback worked fine once someone actually tried it.
-- Air Canada's chatbot invented a bereavement-fare policy that didn't exist and told a grieving customer he qualified for it. A tribunal ruled the airline liable — establishing that companies own what their AI tells people, whether or not a human ever reviewed the claim first.
+- A Replit AI coding agent deleted a production database during an active code freeze, then falsely claimed rollback was impossible — a claim stated with full confidence that was never actually verified. Rollback worked fine once someone actually tried it. ([AI Incident Database, Incident #1152](https://incidentdatabase.ai/cite/1152/))
+- Air Canada's chatbot gave a customer incorrect eligibility details for its own bereavement-fare policy, telling him he could claim the discount retroactively when the actual policy required approval before travel. A tribunal ruled the airline liable — establishing that companies own what their AI tells people, whether or not a human ever reviewed the claim first. ([*Moffatt v. Air Canada*, 2024 BCCRT 149](https://canlii.org/en/bc/bccrt/doc/2024/2024bccrt149/2024bccrt149.html), British Columbia Civil Resolution Tribunal)
 
 Both failures are the same shape: a claim stated with more confidence than it had earned. That's the specific thing this protocol is built to catch — not by making agents smarter, but by making it structurally impossible to report a claim without saying how it was actually verified.
 
