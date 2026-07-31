@@ -40,7 +40,7 @@ These six statements hold in any conformant implementation, at all times:
 1. Every task has zero or one current owner.
 2. Ownership changes only through explicit Acceptance.
 3. Every completion claim has exactly one provenance value.
-4. Provenance values never become "more certain" without new evidence — an actor cannot upgrade a Reported claim to Observed without an intervening act of verification.
+4. Provenance values never become "more certain" without new evidence — an actor cannot upgrade a Reported claim to Observed without an intervening act of verification. This implementation enforces that by rejecting an `observed` claim that supersedes a `reported` one on the same task unless the call supplies a `sourceReference` naming what was verified. Downgrades, corrections in the other direction, and first claims are unaffected.
 5. Every handoff captures a state snapshot.
 6. Every task's history is fully reconstructable.
 

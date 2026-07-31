@@ -127,6 +127,12 @@ export async function acceptTask(taskId: string, input: AcceptTaskInput) {
   return ok(201, acceptance);
 }
 
+/**
+ * Internal sentinel used to abort a completion transaction from inside the
+ * callback. Not part of any transport-visible contract.
+ */
+const PROVENANCE_UPGRADE_WITHOUT_EVIDENCE = "__opp_provenance_upgrade_without_evidence__";
+
 export interface ReportCompletionInput {
   actorId: string;
   provenance: "observed" | "reviewed" | "reported";
@@ -159,30 +165,64 @@ export async function reportCompletion(taskId: string, input: ReportCompletionIn
   // transaction as the insert, exactly as acceptTask asserts its claim: if the
   // caller is no longer the current owner the UPDATE matches zero rows and the
   // whole transaction is abandoned.
-  const completion = await db.transaction(async (tx) => {
-    const claimed = await tx
-      .update(tasksTable)
-      .set({ status: "completed" })
-      .where(and(eq(tasksTable.id, taskId), eq(tasksTable.currentOwnerActorId, actorId)))
-      .returning({ id: tasksTable.id });
+  let completion: typeof taskCompletionsTable.$inferSelect | null;
+  try {
+    completion = await db.transaction(async (tx) => {
+      const claimed = await tx
+        .update(tasksTable)
+        .set({ status: "completed" })
+        .where(and(eq(tasksTable.id, taskId), eq(tasksTable.currentOwnerActorId, actorId)))
+        .returning({ id: tasksTable.id });
 
-    if (claimed.length !== 1) {
-      return null;
+      if (claimed.length !== 1) {
+        return null;
+      }
+
+      // Invariant 4: a claim never becomes more certain without new evidence.
+      // Completions are append-only, so nothing stops an actor reporting
+      // "reported" and then immediately reporting "observed" over the top —
+      // and since getTaskStatus surfaces the latest claim as the applicable
+      // one, that silently launders hearsay into first-hand observation. An
+      // upgrade is allowed, but only when the caller points at what they
+      // actually verified. Read inside the transaction so a concurrent
+      // completion cannot slip in between this check and the insert.
+      const [latest] = await tx
+        .select()
+        .from(taskCompletionsTable)
+        .where(eq(taskCompletionsTable.taskId, taskId))
+        .orderBy(desc(taskCompletionsTable.reportedAt))
+        .limit(1);
+
+      if (latest?.provenance === "reported" && provenance === "observed" && !sourceReference) {
+        // Throwing rolls back the status update above as well; a rejected
+        // claim must not leave the task marked completed.
+        throw new Error(PROVENANCE_UPGRADE_WITHOUT_EVIDENCE);
+      }
+
+      const [row] = await tx
+        .insert(taskCompletionsTable)
+        .values({
+          taskId,
+          actorId,
+          provenance,
+          claimText,
+          sourceReference: sourceReference ?? null,
+        })
+        .returning();
+
+      return row;
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message === PROVENANCE_UPGRADE_WITHOUT_EVIDENCE) {
+      return fail(
+        409,
+        `Task ${taskId} already carries a "reported" completion claim. Upgrading to ` +
+          `"observed" requires a sourceReference recording how it was verified — ` +
+          `provenance cannot become more certain without new evidence.`,
+      );
     }
-
-    const [row] = await tx
-      .insert(taskCompletionsTable)
-      .values({
-        taskId,
-        actorId,
-        provenance,
-        claimText,
-        sourceReference: sourceReference ?? null,
-      })
-      .returning();
-
-    return row;
-  });
+    throw err;
+  }
 
   if (!completion) {
     const [current] = await db.select().from(tasksTable).where(eq(tasksTable.id, taskId));
