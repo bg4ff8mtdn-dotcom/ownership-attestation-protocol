@@ -1,4 +1,4 @@
-# Ownership & Provenance Protocol (OPP)
+# Ownership & Attestation Protocol (OAP)
 
 A small MCP protocol that enforces two rules no mainstream agent framework currently enforces natively:
 
@@ -11,7 +11,7 @@ That's the whole protocol. Everything else in this repo exists in service of tho
 
 Broken ownership handoffs are a commonly cited failure mode in production multi-agent systems — an agent hands work to another agent, context gets lost, and nobody ends up owning the result. Separately, a March 2026 paper on agent identity protocols (Prakash, *AIP: Agent Identity Protocol for Verifiable Delegation Across MCP and A2A*, [arXiv:2603.24775](https://arxiv.org/abs/2603.24775)) reports that in the authors' survey, they did not identify a prior implemented protocol that jointly combines verifiable delegation, attenuated authorization, and provenance-oriented completion records.
 
-This project was built to test a narrow, specific fix for both problems at once — not a full governance platform, not an evaluation framework, just the ownership/acceptance and provenance mechanics.
+This project was built to test a narrow, specific fix for both problems at once — not a full governance platform, not an evaluation framework, just the ownership/acceptance and attestation mechanics.
 
 ## Real-world motivation
 
@@ -44,13 +44,13 @@ These six statements hold in any conformant implementation, at all times:
 5. Every handoff captures a state snapshot.
 6. Every task's history is fully reconstructable.
 
-An implementation is OPP-conformant if it requires explicit acceptance, rejects claims without provenance, supports all three provenance categories, preserves reconstructable history, and supports ownership transfer via handoff. Partial implementations should describe themselves as "OPP-inspired," not conformant.
+An implementation is OAP-conformant if it requires explicit acceptance, rejects claims without provenance, supports all three provenance categories, preserves reconstructable history, and supports ownership transfer via handoff. Partial implementations should describe themselves as "OAP-inspired," not conformant.
 
 ## Why not just use logs / Git / OpenTelemetry / Temporal?
 
-Fair question, and the short answer is that OPP is meant to sit alongside these, not replace them:
+Fair question, and the short answer is that OAP is meant to sit alongside these, not replace them:
 
-- **Logs** record what happened passively, after the fact. OPP requires an active commitment before a claim is accepted as complete.
+- **Logs** record what happened passively, after the fact. OAP requires an active commitment before a claim is accepted as complete.
 - **Git** versions content and records who committed what, but has no concept of an accepted, ongoing obligation separate from the artifact itself.
 - **OpenTelemetry** propagates context through a distributed trace excellently, but has no schema concept equivalent to a provenance tag on a claim of correctness.
 - **Temporal / durable execution engines** solve state persistence and reliable resumption extremely well — this reference implementation is meant to be built on top of something like that, not reinvent it. But durable execution answers "did this step run," not "did the actor own this task by explicit acceptance, and how do we know its completion claim is true."
@@ -80,8 +80,8 @@ pnpm --filter @workspace/api-server run dev
 **Create at least one actor before calling any tool.** Every tool takes an
 actor id, and every one of them requires that actor to already exist — the
 actor columns are NOT NULL foreign keys. The protocol deliberately has no
-`create_actor` tool or route: actor identity is an input to OPP, not something
-OPP issues, so on a real deployment actors come from whatever system already
+`create_actor` tool or route: actor identity is an input to OAP, not something
+OAP issues, so on a real deployment actors come from whatever system already
 owns identity. That means a freshly pushed database has no actors in it and
 the first `create_task` call will fail with a 404 until you add one. For local
 development there is a seed script:
@@ -120,7 +120,7 @@ provenance record this protocol exists to protect.
 
 ## Status
 
-This is an early, personally-tested project, not a polished product. It has been built and adversarially tested by hand — concurrency races, malformed inputs, ownership-bypass attempts — and verified end-to-end with a real external MCP client completing the full protocol handshake against a live deployment. The ownership and provenance guarantees that hand-testing covered are now pinned by an automated suite that runs the races concurrently against a real database. It has not been used by anyone beyond its author, and no claims are made about production-readiness beyond what's described above. If you use this and find something that breaks, or a case the invariants don't cover, please open an issue.
+This is an early, personally-tested project, not a polished product. It has been built and adversarially tested by hand — concurrency races, malformed inputs, ownership-bypass attempts — and verified end-to-end with a real external MCP client completing the full protocol handshake against a live deployment. The ownership and attestation guarantees that hand-testing covered are now pinned by an automated suite that runs the races concurrently against a real database. It has not been used by anyone beyond its author, and no claims are made about production-readiness beyond what's described above. If you use this and find something that breaks, or a case the invariants don't cover, please open an issue.
 
 ## License
 

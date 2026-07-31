@@ -44,7 +44,7 @@ export function createTaskMcpServer(): McpServer {
   // reporting a different version in its initialize response than the registry
   // advertises is a quiet lie to every client that inspects serverInfo.
   const server = new McpServer({
-    name: "ownership-provenance-protocol",
+    name: "ownership-attestation-protocol",
     version: "1.0.1",
   });
 

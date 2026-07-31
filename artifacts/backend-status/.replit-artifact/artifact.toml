@@ -1,6 +1,6 @@
 kind = "web"
 previewPath = "/"
-title = "Ownership & Provenance Protocol"
+title = "Ownership & Attestation Protocol"
 version = "1.0.0"
 id = "artifacts/backend-status"
 router = "path"

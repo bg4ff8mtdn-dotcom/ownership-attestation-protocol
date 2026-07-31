@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 
 const serverCard = {
   serverInfo: {
-    name: "Ownership & Provenance Protocol",
+    name: "Ownership & Attestation Protocol",
     version: "1.0.1",
   },
   authentication: {
