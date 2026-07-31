@@ -134,19 +134,29 @@ export async function reportCompletion(taskId: string, input: ReportCompletionIn
     return fail(404, `Actor ${actorId} not found`);
   }
 
-  if (task.currentOwnerActorId === null) {
-    return fail(409, `Task ${taskId} has no current owner; ${actorId} must call accept_task first`);
-  }
-
-  if (task.currentOwnerActorId !== actorId) {
-    return fail(
-      403,
-      `Task ${taskId} is currently owned by ${task.currentOwnerActorId}; ` +
-        `${actorId} cannot report completion`,
-    );
-  }
-
+  // The reads above produce clean 404s, but they are not the ownership
+  // guard — they cannot be. Checking ownership here and writing later leaves a
+  // gap in which a concurrent handoff can clear the owner and set
+  // "transitioned", after which this call would still write its completion and
+  // unconditionally overwrite that status. The task would then report itself
+  // completed while owned by nobody, carrying a claim from an actor that had
+  // already handed the work away.
+  //
+  // So ownership is asserted by the status UPDATE itself, inside the same
+  // transaction as the insert, exactly as acceptTask asserts its claim: if the
+  // caller is no longer the current owner the UPDATE matches zero rows and the
+  // whole transaction is abandoned.
   const completion = await db.transaction(async (tx) => {
+    const claimed = await tx
+      .update(tasksTable)
+      .set({ status: "completed" })
+      .where(and(eq(tasksTable.id, taskId), eq(tasksTable.currentOwnerActorId, actorId)))
+      .returning({ id: tasksTable.id });
+
+    if (claimed.length !== 1) {
+      return null;
+    }
+
     const [row] = await tx
       .insert(taskCompletionsTable)
       .values({
@@ -158,10 +168,26 @@ export async function reportCompletion(taskId: string, input: ReportCompletionIn
       })
       .returning();
 
-    await tx.update(tasksTable).set({ status: "completed" }).where(eq(tasksTable.id, taskId));
-
     return row;
   });
+
+  if (!completion) {
+    const [current] = await db.select().from(tasksTable).where(eq(tasksTable.id, taskId));
+    if (!current) {
+      return fail(404, `Task ${taskId} not found`);
+    }
+    if (current.currentOwnerActorId === null) {
+      return fail(
+        409,
+        `Task ${taskId} has no current owner; ${actorId} must call accept_task first`,
+      );
+    }
+    return fail(
+      403,
+      `Task ${taskId} is currently owned by ${current.currentOwnerActorId}; ` +
+        `${actorId} cannot report completion`,
+    );
+  }
 
   return ok(201, completion);
 }
