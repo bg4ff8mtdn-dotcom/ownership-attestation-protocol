@@ -41,6 +41,19 @@ export interface CreateTaskInput {
 }
 
 export async function createTask(input: CreateTaskInput) {
+  // injectedBy is a NOT NULL foreign key to actors. Without this check the
+  // insert fails at the database level and the driver's error — which carries
+  // the full SQL statement and its parameter list — is handed back to the
+  // caller verbatim. acceptTask and reportCompletion already validate their
+  // actors this way; createTask was the one path that did not.
+  const [actor] = await db
+    .select()
+    .from(actorsTable)
+    .where(eq(actorsTable.id, input.injectedBy));
+  if (!actor) {
+    return fail(404, `Actor ${input.injectedBy} not found`);
+  }
+
   const [task] = await db
     .insert(tasksTable)
     .values({

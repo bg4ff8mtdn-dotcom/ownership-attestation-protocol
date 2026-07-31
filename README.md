@@ -77,6 +77,22 @@ pnpm --filter @workspace/db run push
 pnpm --filter @workspace/api-server run dev
 ```
 
+**Create at least one actor before calling any tool.** Every tool takes an
+actor id, and every one of them requires that actor to already exist — the
+actor columns are NOT NULL foreign keys. The protocol deliberately has no
+`create_actor` tool or route: actor identity is an input to OPP, not something
+OPP issues, so on a real deployment actors come from whatever system already
+owns identity. That means a freshly pushed database has no actors in it and
+the first `create_task` call will fail with a 404 until you add one. For local
+development there is a seed script:
+
+```bash
+pnpm --filter @workspace/scripts run seed-actor alice human "Alice"
+```
+
+It is a plain script, not part of the protocol surface — it is never imported
+by the server and is not reachable over HTTP.
+
 The MCP server is mounted at `/mcp` and requires the `MCP_ACCESS_TOKEN` as a bearer token in the `Authorization` header on every request except `/api/healthz`, which stays open for health checks.
 
 Connect a real MCP client (e.g. Claude Code):
