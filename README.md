@@ -40,7 +40,7 @@ These six statements hold in any conformant implementation, at all times:
 1. Every task has zero or one current owner.
 2. Ownership changes only through explicit Acceptance.
 3. Every completion claim has exactly one provenance value.
-4. Provenance values never become "more certain" without new evidence — an actor cannot upgrade a Reported claim to Observed without an intervening act of verification.
+4. Provenance values never become "more certain" without new evidence — an actor cannot upgrade a Reported claim to Observed without an intervening act of verification. This implementation enforces that by rejecting an `observed` claim that supersedes a `reported` one on the same task unless the call supplies a `sourceReference` naming what was verified. Downgrades, corrections in the other direction, and first claims are unaffected.
 5. Every handoff captures a state snapshot.
 6. Every task's history is fully reconstructable.
 
@@ -77,6 +77,22 @@ pnpm --filter @workspace/db run push
 pnpm --filter @workspace/api-server run dev
 ```
 
+**Create at least one actor before calling any tool.** Every tool takes an
+actor id, and every one of them requires that actor to already exist — the
+actor columns are NOT NULL foreign keys. The protocol deliberately has no
+`create_actor` tool or route: actor identity is an input to OPP, not something
+OPP issues, so on a real deployment actors come from whatever system already
+owns identity. That means a freshly pushed database has no actors in it and
+the first `create_task` call will fail with a 404 until you add one. For local
+development there is a seed script:
+
+```bash
+pnpm --filter @workspace/scripts run seed-actor alice human "Alice"
+```
+
+It is a plain script, not part of the protocol surface — it is never imported
+by the server and is not reachable over HTTP.
+
 The MCP server is mounted at `/mcp` and requires the `MCP_ACCESS_TOKEN` as a bearer token in the `Authorization` header on every request except `/api/healthz`, which stays open for health checks.
 
 Connect a real MCP client (e.g. Claude Code):
@@ -85,9 +101,26 @@ Connect a real MCP client (e.g. Claude Code):
 claude mcp add --transport http opp http://localhost:5000/mcp --header "Authorization: Bearer <your-token>"
 ```
 
+## Running the tests
+
+The suite covers the protocol's concurrency guarantees, so it needs a real
+PostgreSQL instance — it exercises genuinely simultaneous transactions and
+cannot run against an in-process or single-connection substitute.
+
+```bash
+pnpm --filter @workspace/api-server run test
+```
+
+Tests connect to `postgresql://opp:opptest@127.0.0.1:55432/opp_test` by
+default. Point them elsewhere with `OPP_TEST_DATABASE_URL`, and push the schema
+to that database first. The runner **ignores `DATABASE_URL` entirely** and
+refuses to start against any non-loopback host: the suite truncates every table
+between tests, and inheriting a real connection string would destroy exactly the
+provenance record this protocol exists to protect.
+
 ## Status
 
-This is an early, personally-tested project, not a polished product. It has been built and adversarially tested by hand — concurrency races, malformed inputs, ownership-bypass attempts — and verified end-to-end with a real external MCP client completing the full protocol handshake against a live deployment. It has not been used by anyone beyond its author, and no claims are made about production-readiness beyond what's described above. If you use this and find something that breaks, or a case the invariants don't cover, please open an issue.
+This is an early, personally-tested project, not a polished product. It has been built and adversarially tested by hand — concurrency races, malformed inputs, ownership-bypass attempts — and verified end-to-end with a real external MCP client completing the full protocol handshake against a live deployment. The ownership and provenance guarantees that hand-testing covered are now pinned by an automated suite that runs the races concurrently against a real database. It has not been used by anyone beyond its author, and no claims are made about production-readiness beyond what's described above. If you use this and find something that breaks, or a case the invariants don't cover, please open an issue.
 
 ## License
 

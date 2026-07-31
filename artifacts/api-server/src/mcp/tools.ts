@@ -40,9 +40,12 @@ function toolResult(result: { ok: boolean; status: number; data?: unknown; error
 }
 
 export function createTaskMcpServer(): McpServer {
+  // Keep in step with the version published in server.json. A deployment
+  // reporting a different version in its initialize response than the registry
+  // advertises is a quiet lie to every client that inspects serverInfo.
   const server = new McpServer({
     name: "ownership-provenance-protocol",
-    version: "1.0.0",
+    version: "1.0.1",
   });
 
   server.registerTool(

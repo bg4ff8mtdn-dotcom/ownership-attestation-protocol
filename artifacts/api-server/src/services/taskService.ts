@@ -41,6 +41,19 @@ export interface CreateTaskInput {
 }
 
 export async function createTask(input: CreateTaskInput) {
+  // injectedBy is a NOT NULL foreign key to actors. Without this check the
+  // insert fails at the database level and the driver's error — which carries
+  // the full SQL statement and its parameter list — is handed back to the
+  // caller verbatim. acceptTask and reportCompletion already validate their
+  // actors this way; createTask was the one path that did not.
+  const [actor] = await db
+    .select()
+    .from(actorsTable)
+    .where(eq(actorsTable.id, input.injectedBy));
+  if (!actor) {
+    return fail(404, `Actor ${input.injectedBy} not found`);
+  }
+
   const [task] = await db
     .insert(tasksTable)
     .values({
@@ -114,6 +127,12 @@ export async function acceptTask(taskId: string, input: AcceptTaskInput) {
   return ok(201, acceptance);
 }
 
+/**
+ * Internal sentinel used to abort a completion transaction from inside the
+ * callback. Not part of any transport-visible contract.
+ */
+const PROVENANCE_UPGRADE_WITHOUT_EVIDENCE = "__opp_provenance_upgrade_without_evidence__";
+
 export interface ReportCompletionInput {
   actorId: string;
   provenance: "observed" | "reviewed" | "reported";
@@ -134,34 +153,94 @@ export async function reportCompletion(taskId: string, input: ReportCompletionIn
     return fail(404, `Actor ${actorId} not found`);
   }
 
-  if (task.currentOwnerActorId === null) {
-    return fail(409, `Task ${taskId} has no current owner; ${actorId} must call accept_task first`);
+  // The reads above produce clean 404s, but they are not the ownership
+  // guard — they cannot be. Checking ownership here and writing later leaves a
+  // gap in which a concurrent handoff can clear the owner and set
+  // "transitioned", after which this call would still write its completion and
+  // unconditionally overwrite that status. The task would then report itself
+  // completed while owned by nobody, carrying a claim from an actor that had
+  // already handed the work away.
+  //
+  // So ownership is asserted by the status UPDATE itself, inside the same
+  // transaction as the insert, exactly as acceptTask asserts its claim: if the
+  // caller is no longer the current owner the UPDATE matches zero rows and the
+  // whole transaction is abandoned.
+  let completion: typeof taskCompletionsTable.$inferSelect | null;
+  try {
+    completion = await db.transaction(async (tx) => {
+      const claimed = await tx
+        .update(tasksTable)
+        .set({ status: "completed" })
+        .where(and(eq(tasksTable.id, taskId), eq(tasksTable.currentOwnerActorId, actorId)))
+        .returning({ id: tasksTable.id });
+
+      if (claimed.length !== 1) {
+        return null;
+      }
+
+      // Invariant 4: a claim never becomes more certain without new evidence.
+      // Completions are append-only, so nothing stops an actor reporting
+      // "reported" and then immediately reporting "observed" over the top —
+      // and since getTaskStatus surfaces the latest claim as the applicable
+      // one, that silently launders hearsay into first-hand observation. An
+      // upgrade is allowed, but only when the caller points at what they
+      // actually verified. Read inside the transaction so a concurrent
+      // completion cannot slip in between this check and the insert.
+      const [latest] = await tx
+        .select()
+        .from(taskCompletionsTable)
+        .where(eq(taskCompletionsTable.taskId, taskId))
+        .orderBy(desc(taskCompletionsTable.reportedAt))
+        .limit(1);
+
+      if (latest?.provenance === "reported" && provenance === "observed" && !sourceReference) {
+        // Throwing rolls back the status update above as well; a rejected
+        // claim must not leave the task marked completed.
+        throw new Error(PROVENANCE_UPGRADE_WITHOUT_EVIDENCE);
+      }
+
+      const [row] = await tx
+        .insert(taskCompletionsTable)
+        .values({
+          taskId,
+          actorId,
+          provenance,
+          claimText,
+          sourceReference: sourceReference ?? null,
+        })
+        .returning();
+
+      return row;
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message === PROVENANCE_UPGRADE_WITHOUT_EVIDENCE) {
+      return fail(
+        409,
+        `Task ${taskId} already carries a "reported" completion claim. Upgrading to ` +
+          `"observed" requires a sourceReference recording how it was verified — ` +
+          `provenance cannot become more certain without new evidence.`,
+      );
+    }
+    throw err;
   }
 
-  if (task.currentOwnerActorId !== actorId) {
+  if (!completion) {
+    const [current] = await db.select().from(tasksTable).where(eq(tasksTable.id, taskId));
+    if (!current) {
+      return fail(404, `Task ${taskId} not found`);
+    }
+    if (current.currentOwnerActorId === null) {
+      return fail(
+        409,
+        `Task ${taskId} has no current owner; ${actorId} must call accept_task first`,
+      );
+    }
     return fail(
       403,
-      `Task ${taskId} is currently owned by ${task.currentOwnerActorId}; ` +
+      `Task ${taskId} is currently owned by ${current.currentOwnerActorId}; ` +
         `${actorId} cannot report completion`,
     );
   }
-
-  const completion = await db.transaction(async (tx) => {
-    const [row] = await tx
-      .insert(taskCompletionsTable)
-      .values({
-        taskId,
-        actorId,
-        provenance,
-        claimText,
-        sourceReference: sourceReference ?? null,
-      })
-      .returning();
-
-    await tx.update(tasksTable).set({ status: "completed" }).where(eq(tasksTable.id, taskId));
-
-    return row;
-  });
 
   return ok(201, completion);
 }
@@ -189,7 +268,19 @@ export async function handoffTask(taskId: string, input: HandoffTaskInput) {
     const handoff = await db.transaction(async (tx) => {
       // Capture the context snapshot inside the same transaction so it
       // reflects a single, consistent moment in time.
-      const [task] = await tx.select().from(tasksTable).where(eq(tasksTable.id, taskId));
+      //
+      // FOR UPDATE is load-bearing here. A plain SELECT takes no row lock
+      // under READ COMMITTED, so two concurrent handoffs from the same owner
+      // could both read themselves as the current owner, both pass the checks
+      // below, and both commit — recording two transfers to two different
+      // recipients for a single change of ownership. Locking the row
+      // serialises them: the second transaction blocks here, then re-reads and
+      // finds ownership already cleared.
+      const [task] = await tx
+        .select()
+        .from(tasksTable)
+        .where(eq(tasksTable.id, taskId))
+        .for("update");
       if (!task) {
         throw new Error(`Task ${taskId} not found`);
       }
@@ -259,10 +350,21 @@ export async function handoffTask(taskId: string, input: HandoffTaskInput) {
         })
         .returning();
 
-      await tx
+      // Atomic conditional release, mirroring the conditional claim in
+      // acceptTask: the UPDATE itself re-asserts ownership rather than
+      // trusting the earlier read. The row lock above already guarantees
+      // exclusivity, so this should never fail — asserting the affected row
+      // count keeps that guarantee explicit instead of leaving it implicit in
+      // the isolation level.
+      const released = await tx
         .update(tasksTable)
         .set({ status: "transitioned", currentOwnerActorId: null })
-        .where(eq(tasksTable.id, taskId));
+        .where(and(eq(tasksTable.id, taskId), eq(tasksTable.currentOwnerActorId, fromActorId)))
+        .returning({ id: tasksTable.id });
+
+      if (released.length !== 1) {
+        throw new Error(`Task ${taskId} ownership changed during handoff; handoff rejected`);
+      }
 
       return row;
     });
@@ -272,9 +374,11 @@ export async function handoffTask(taskId: string, input: HandoffTaskInput) {
     const message = err instanceof Error ? err.message : "Failed to capture context snapshot";
     const status = message.startsWith(`Task ${taskId} not found`)
       ? 404
-      : message.includes("cannot hand it off") || message.includes("handoff rejected")
-        ? 403
-        : 400;
+      : message.includes("ownership changed during handoff")
+        ? 409
+        : message.includes("cannot hand it off") || message.includes("handoff rejected")
+          ? 403
+          : 400;
     return fail(status, message);
   }
 }
