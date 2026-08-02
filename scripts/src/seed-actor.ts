@@ -4,8 +4,8 @@
  * Every protocol tool takes an actor id and every one of them requires that
  * actor to already exist — tasks.injected_by, task_acceptances.actor_id and
  * the rest are NOT NULL foreign keys into actors. The protocol deliberately
- * exposes no way to create one: actor identity is an input to OPP, not
- * something OPP issues, so there is no create_actor tool and no REST route.
+ * exposes no way to create one: actor identity is an input to OAP, not
+ * something OAP issues, so there is no create_actor tool and no REST route.
  * On a real deployment actors are provisioned by whatever system already owns
  * identity.
  *

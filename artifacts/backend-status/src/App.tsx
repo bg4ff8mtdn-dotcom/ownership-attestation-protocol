@@ -14,7 +14,7 @@ function App() {
     }}>
       <div style={{ maxWidth: 640, textAlign: "center" }}>
         <h1 style={{ fontSize: "1.5rem", fontWeight: 600, marginBottom: "0.75rem" }}>
-          Ownership &amp; Provenance Protocol
+          Ownership &amp; Attestation Protocol
         </h1>
         <p style={{ fontSize: "0.95rem", color: "#a9b0bb", lineHeight: 1.6, marginBottom: "1.5rem" }}>
           This is a backend API and MCP service. There is no user interface here.

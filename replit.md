@@ -1,4 +1,4 @@
-# Ownership & Provenance Protocol
+# Ownership & Attestation Protocol
 
 A backend protocol that tracks task ownership and provenance across human and AI actors — every task has an auditable trail of who created it, who accepted/owns it, who claims it's done (and how they know), and every handoff between actors.
 
