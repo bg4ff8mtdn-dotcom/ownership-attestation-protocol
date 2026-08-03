@@ -1,16 +1,10 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.bg4ff8mtdn-dotcom/ownership-attestation-protocol",
-  "description": "MCP protocol enforcing explicit task acceptance and mandatory provenance tags on completion claims. The remote endpoint listed here is a reference deployment for testing and demonstration only — it requires a bearer token that only the maintainer holds, and there is no public sign-up or shared access, so connecting to it without that token returns 401. To actually use this protocol, deploy your own copy: clone the repo, set your own MCP_ACCESS_TOKEN, and point your MCP client at your own instance. See the README for setup instructions.",
+  "description": "MCP protocol enforcing explicit task acceptance and attestation-tagged completion claims.",
   "repository": {
     "url": "https://github.com/bg4ff8mtdn-dotcom/ownership-attestation-protocol",
     "source": "github"
   },
-  "version": "1.0.1",
-  "remotes": [
-    {
-      "type": "streamable-http",
-      "url": "https://ownership-provenance-protocol.replit.app/mcp"
-    }
-  ]
+  "version": "1.0.1"
 }
